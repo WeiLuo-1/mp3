@@ -66,6 +66,15 @@ module.exports = function (router) {
             var queryParams = parseQueryParams(req);
             var mongooseQuery = User.find(queryParams.where || {});
 
+            // Parse 'filter' parameter (used for field projection, e.g. {"_id":1})
+            if (req.query.filter) {
+                try {
+                    query.filter = JSON.parse(req.query.filter);
+                } catch (e) {
+                    throw new Error('Invalid filter parameter');
+                }
+            }
+
             // Apply sort
             if (queryParams.sort) {
                 mongooseQuery = mongooseQuery.sort(queryParams.sort);

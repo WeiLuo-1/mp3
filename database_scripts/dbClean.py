@@ -1,105 +1,82 @@
-#!/usr/bin/env python
-
-"""
- * @file dbClean.py
- * Used in CS498RK MP4 to empty database of all users and tasks.
- *
- * @author Aswin Sivaraman
- * @date Created: Spring 2015
- * @date Modified: Spring 2015
- * @date Modified: Spring 2019
-"""
-
+#!/usr/bin/env python3
 import sys
 import getopt
 import http.client
-import urllib
+import urllib.parse
 import json
+import time
 
 def usage():
-    print('dbClean.py -u <baseurl> -p <port>')
+    print("dbClean.py -u <baseurl> -p <port>")
 
-def getUsers(conn):
-    # Retrieve the list of users
-    conn.request("GET","""/api/users?filter={"_id":1}""")
+def getItems(conn, endpoint):
+    """Fetch all IDs from /api/users or /api/tasks"""
+    conn.request("GET", f"/api/{endpoint}")
     response = conn.getresponse()
-    data = response.read()
-    d = json.loads(data)
+    data = response.read().decode()
+    try:
+        d = json.loads(data)
+        if isinstance(d, dict) and "data" in d and d["data"]:
+            return [str(item["_id"]) for item in d["data"]]
+    except Exception:
+        print(f"[WARN] Could not parse response for {endpoint}: {data}")
+    return []
 
-    # Array of user IDs
-    users = [str(d['data'][x]['_id']) for x in range(len(d['data']))]
-
-    return users
-
-def getTasks(conn):
-    # Retrieve the list of tasks
-    conn.request("GET","""/api/tasks?filter={"_id":1}""")
+def deleteItem(conn, endpoint, item_id):
+    """Send DELETE request and report status"""
+    conn.request("DELETE", f"/api/{endpoint}/{item_id}")
     response = conn.getresponse()
-    data = response.read()
-    d = json.loads(data)
-
-    # Array of user IDs
-    tasks = [str(d['data'][x]['_id']) for x in range(len(d['data']))]
-
-    return tasks
+    status = response.status
+    body = response.read().decode()
+    if status in (200, 204):
+        print(f"Deleted {endpoint[:-1]} {item_id}")
+        return True
+    else:
+        print(f"[ERROR] Failed to delete {endpoint[:-1]} {item_id}: {status} {body}")
+        return False
 
 def main(argv):
-
-    # Server Base URL and port
     baseurl = "localhost"
     port = 4000
 
     try:
-        opts, args = getopt.getopt(argv,"hu:p:",["url=","port="])
+        opts, _ = getopt.getopt(argv, "hu:p:", ["url=", "port="])
     except getopt.GetoptError:
         usage()
         sys.exit(2)
     for opt, arg in opts:
-        if opt == '-h':
-             usage()
-             sys.exit()
+        if opt == "-h":
+            usage()
+            sys.exit()
         elif opt in ("-u", "--url"):
-             baseurl = str(arg)
+            baseurl = str(arg)
         elif opt in ("-p", "--port"):
-             port = int(arg)
+            port = int(arg)
 
-    # Server to connect to (1: url, 2: port number)
     conn = http.client.HTTPConnection(baseurl, port)
 
-    # Fetch a list of users
-    users = getUsers(conn)
+    # --- Delete users ---
+    users = getItems(conn, "users")
+    if not users:
+        print("No users found.")
+    while users:
+        for uid in users:
+            deleteItem(conn, "users", uid)
+            time.sleep(0.1)
+        users = getItems(conn, "users")
 
-    # Loop for as long as the database still returns users
-    while len(users):
+    # --- Delete tasks ---
+    tasks = getItems(conn, "tasks")
+    if not tasks:
+        print("No tasks found.")
+    while tasks:
+        for tid in tasks:
+            deleteItem(conn, "tasks", tid)
+            time.sleep(0.1)
+        tasks = getItems(conn, "tasks")
 
-        # Delete each individual user
-        for user in users:
-            conn.request("DELETE","/api/users/"+user)
-            response = conn.getresponse()
-            data = response.read()
-
-        # Fetch a list of users
-        users = getUsers(conn)
-
-    # Fetch a list of tasks
-    tasks = getTasks(conn)
-
-    # Loop for as long as the database still returns tasks
-    while len(tasks):
-
-        # Delete each individual task
-        for task in tasks:
-            conn.request("DELETE","/api/tasks/"+task)
-            response = conn.getresponse()
-            data = response.read()
-
-        # Fetch a list of tasks
-        tasks = getTasks(conn)
-
-    # Exit gracefully
     conn.close()
-    print("All users and tasks removed at "+baseurl+":"+str(port))
-
+    print(f"✅ All users and tasks removed at {baseurl}:{port}")
 
 if __name__ == "__main__":
-     main(sys.argv[1:])
+    main(sys.argv[1:])
